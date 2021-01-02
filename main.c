@@ -221,7 +221,7 @@ int main(){
 				}
 			}
 			*usart_cr1 &= 0xFFFFFFF7 // Disable Transmission
-			*usart_cr1 |= 0x0000 0004; // Enable Reception
+			*usart_cr1 |= 0x00000004; // Enable Reception
 			*adc_cr |= 0x00000004; // Start ADC
 			*usart_interrupt_flag = 0x00; // Reset Interrupt-Flag
 		}
