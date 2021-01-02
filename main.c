@@ -187,7 +187,7 @@ int main(){
 	uint32 *usart_tdr; // USART transmit data register (STMR S. 640)
 	usart_tdr = 0x40013800 + 0x28;
 
-	uint32_t *buf=malloc(10*sizeof(uint32_t)); 10 Byte (nur die jeweils letzten 8 Bit werden verwendet) Buffer fuer ADC
+	uint32_t *buf=malloc(10*sizeof(uint32_t)); // 10 Byte (nur die jeweils letzten 8 Bit werden verwendet) Buffer fuer ADC
 	buf = 0x??? // Adresse im SRAM
 
 	for(int i=0; i<=9; i++){
