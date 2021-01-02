@@ -132,13 +132,13 @@ int main(){
 	// -- NVIC/Interrupt configuration --
 	uint32_t *usart1_interrupt; // Vector table USART1 entry (STMR S. 171)
 	usart1_interrupt = 0x000000AC; // location of USART1 entry in vector table
-	*usart1_interrupt = 0x???; // SETZEN der Startadresse der ISR
+	*usart1_interrupt = 0x???; // SETZEN der Startadresse der ISR; !!!UNGERADE!!!
 	NVIC_EnableIRQ(27); // Enable USART1-Interrupt
 	NVIC_SetPriority(27, 2); // Setzen der Prioritaet
 
 	uint32_t *adc_interrupt; // Vector table ADC entry (STMR S. 171)
 	adc_interrupt = 0x00000070; // location of ADC entry in vector table
-	*adc_interrupt = 0x???; // SETZEN der Stardadresse der ISR
+	*adc_interrupt = 0x???; // SETZEN der Stardadresse der ISR !!!UNGERADE!!!
 	NVIC_EnableIRQ(19); // Enable USART1-Interrupt
 	NVIC_SetPriority(19, 3); // Setzen der Prioritaet
 	// --------------------------------------------------
@@ -158,11 +158,12 @@ int main(){
 	uint32_t *usart_cr3; // USART control register 3 (STMR S. 630)
 	usart_cr3 = 0x40013800 + 0x08;
 	*usart_cr3 |= 0x00005800 // Disable Overrun-Error, Enable DE-function, one sample bit method
+	// falls half-duplex:
 	// *usart_cr3 |= 0x00005808
 	// * Disable Overrun-Error, 
 	// * Enable DE-function,
 	// * one sample bit method,
-	// * half,duplex-mode
+	// * half-duplex-mode
 
 	uint32_t *usart_brr; // Baud rate register (STMR S. 633)
 	usart_brr = 0x40013800 + 0x0C;
@@ -188,7 +189,6 @@ int main(){
 	usart_tdr = 0x40013800 + 0x28;
 
 	uint32_t *buf=malloc(10*sizeof(uint32_t)); // 10 Byte (nur die jeweils letzten 8 Bit werden verwendet) Buffer fuer ADC
-	buf = 0x??? // Adresse im SRAM
 
 	for(int i=0; i<=9; i++){
 		*(buf+i) = 0x00; // Reset Buffer
