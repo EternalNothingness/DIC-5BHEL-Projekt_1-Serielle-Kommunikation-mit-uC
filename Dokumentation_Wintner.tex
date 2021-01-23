@@ -1,0 +1,582 @@
+\documentclass[11pt]{report}
+	\usepackage{graphicx}
+	\usepackage{listings}
+	\lstset{basicstyle=\small, breaklines=true}
+	\usepackage{hyperref}
+
+\begin{document}
+	\title{DIC Projekt 1\\{\small Serielle Kommunikation mit einem uC}}
+	\author{Autor: Patrick Wintner, 5BHEL\\Betreuer: Lezuo}
+	\date{Abgabedatum: 20.02.2021}
+	\maketitle
+	\tableofcontents
+	%\renewcommand{\thesection}{\arabic{section}}
+	\pagebreak
+	\chapter{Allgmeines}
+	\section{Aufgabenstellung}
+		Ein 10 Byte großer Buffer, welcher Messdaten des ADC eines STM32F030F-uCs enthält, soll über RS485 per USART3 übertragen werden, wenn Daten über USART3 empfangen werden. Ein MAX485 ist auf die Pins PC10 und PC11 geroutet, weiters werden eine Baud-Rate von 38400 und ungerade Parität verwendet.
+	\section{RS485}
+		RS485 ist ein Industriestandard für eine Schnittstelle für serielle Datenkommunikation, welcher eine symmetrische Leitung nutzt.\\
+		RS-485 nutzt ein Leiterpaar, wobei einer diese Leitungen invertiert und die andere nicht invertiert ist, um den Pegel eines 1-Bit-Signals zu übertragen. Der Empfänger wertet dann nur die Differenz aus, was den Vorteil hat, dass Gleichtaktstörungen (also ein unerwünschter Offset auf den Leitungen) keinen Einfluss mehr auf die Übertragung haben. Weiters sind nur die elektrischen Spezifikationen definiert, weshalb das Übertragungsprotokoll gewählt werden kann, was dazu führt, das Bausteine mehrerer Hersteller oftmals nicht kompatibel zueinander sind.\\
+		Senderseitig betragen die Signalspannungen mindestens +/-1,5V und höchstens +/-6V. Der Treiber wird oft als Brückenschaltung ausgeführt.\\
+		Empfangsseitig muss die Umschaltschwelle im Bereich von +/-1,2V liegen.\\
+		RS485 wird meistens im half-duplex betrieben (würden zwei Aderpaare verwendet werden, könnte ein Full-Duplex-Betrieb stattfinden) und ist multipointfähig, was bedeutet, dass mehrere Teilnehmer an einem Bus angeschlossen werden können. Die Maximalanzahl an Teilnehmern, welche 32 beträgt, kann erhöht werden, indem Teilnehmer mit geringerer "Unit Load" verwendet werden, wodurch die Teilnehmerzahl bei entsrechend geringer Unit Load auf 256 erhöht werden kann.\\
+		Da RS485 ein Bussystem ist, sollten an den Enden der Leitung Terminierungswiderstände von je 120Ohm angeschlossen werden. Optional können diese zu Bias-Netzwerken ausgebaut werden, um den Störabstand bei inaktiven Treibern zu verbessern.\\
+		\\Spezifikationen:
+		\begin{itemize}
+			\item Anzahl Empfänger: 32
+			\item Maximale Leitungslänge: 1200m
+			\item Maximale Datenübertragungsrate: 120Mb/s
+			\item Gleichtakt-Eingangsspannung: -7 bis +12V
+			\item Eingangswiderstand des Empfängers: 12kOhm (1 Unit Load)
+			\item Eingangsempfindlichkeit des Empfängers: +/-200mV
+		\end{itemize}
+		\includegraphics[width=0.5\textwidth]{"RS485_Spec_Pegel"}\\
+		Transmitter:\\
+		DI ... drive input\\
+		DE ... drive enable input\\
+		Y ... n. inv. driver output\\
+		Z ... inv. driver output\\
+		Receiver\\
+		A ... receiver input for Y\\
+		B ... receiver input for Z\\
+		/RE ... receiver enable (active Low)\\
+		RO ... receiver output\\
+		\\Kompatibilität zu RS-422: RS-485-Bauteile können bei RS-422-Nethwerken verwendet werden, umgekehrt nicht immer.
+	\section{MAX485}
+		Hierbei handelt es sich um einen Transceiver (= sowohl Sender als auch Empfänger) für den RS-485-Standard mit folgenden Eigenschaften:\\
+		half-duplex, Datenrate = 2,5Mb/s, kein Limit bei Slew Rate, Driver/Receiver Enable, quiescent current = 300uA, Anzahl an möglichen Empfängern = 32 und einer Pin-Anzahl von Acht. Logik-Pegel befinden sich auf Seite 2 des Datenblattes, Beschreibungen der Pins auf Seite 7.
+	\section{Pegel}
+		Logikpegel dienen der Repräsentation von den logischen Werten 0 und 1 in der Digitaltechnik. Diese sind oft Spannungen. Es wird zwischen Low-Pegeln (L-Pegeln, Low, L) und High-Pegeln (H-Pegeln, High, H) unterschieden. Bei Spezifikationen werden für L Maximal- und für H Minimalpegel vorgegeben:\\
+		\\V{\tiny IL} ... maximale Eingangsspannung, bei welcher noch arantiert wird, dass diese als L interpretiert wird\\
+		V{\tiny IH} ... minimale Eingangsspannung, bei welcher noch garantiert wird, dass diese als H interpretiert wird\\
+		V{\tiny OL} ... maximale Ausgangsspannung für L\\
+		V{\tiny OH} ... minimale Ausgangsspannung für H\\
+		\\Zusätzlich gilt, dass V{\tiny IL} $>$ V{\tiny OL} und dass V{\tiny IH} $<$ V{\tiny OH}. Dadurch soll sichergestellt werden, dass Eingänge die Werte der ihnen angeschlossenen Ausgänge richtig interpretieren können.
+	\section{Half-Duplex}
+		Duplex ... Richtungsunabhängigkeit eines Kommunikationskanals\\
+		half-duplex: Daten können abwechselnd, aber nicht gleichzeitig, übertragen und empfangen werden.
+	\chapter{Konfiguration des STM32F030F4}
+	\section{Einführung}
+		Beim STM32F030F4-Chip handelt es sich um einen auf ARMv6-M-basierten Microkontroller, welcher mit maximal 48MHz arbeitet, 16kB Flash-Speicher und 4kB SRAM aufweist und eine Reihe von Peripheriegeräten, darunter USART-Schnittstellen und einen ADC enthält. Aus der Tabelle 2 des Datenblattes auf Seite 10 geht hervor, dass Chips der STM32F030xF-Serie lediglich über die USART1-Schnittstelle verfügen, weshalb, entgegen der Aufgabenstellung, USART1 anstatt USART3 verwendet wird und deshalb auch nicht die Pins PC10 und PC11 zum Anschluss des MAX485 verwendet werden.\\
+		\includegraphics[width=1.0\textwidth]{"Table2"}\\
+		\\In diesem Dokument werden oft Auszüge aus verschiedenen Datenblättern und Reference-Manuals verwendet, dabei wird deren Quelle und die Seitenzahl angegeben. Bei der Quellenangabe wird dabei oft das STM-Reference Manual als RM abgekürzt.
+	\section{Memory Organization}
+		siehe RM S. 36ff\\
+		\\Sämtliche Speicher (Datenspeicher, Programmspeicher, Register, etc.) befinden sich im selben linearen 4GB-Adressraum, welcher in 8 Bereiche zu je 512MB aufgeteilt ist:\\
+		\includegraphics[width=1.0\textwidth]{"memorymap"}\\
+		\\Der für dieses Projekt wichtigste Speicherbereich ist jener zum Ansprechen und zur Konfiguration der Peripherie. Im STM-RM S. 37-41 in der Tabelle 1 werden die Grenzadressen der verschiedenen Speicherbereiche aufgelistet. Folgende sind zur Erfüllung der Aufgabenstellung von Belang:
+		\begin{itemize}
+			\item Port A: 0x4800 0000 - 0x4800 03FF
+			\item RCC: 0x4002 1000 - 0x4002 13FF
+			\item USART1: 0x4001 3800 - 0x4001 3BFF
+			\item ADC: 0x4001 2400 - 0x4001 27FF
+		\end{itemize}
+		Anmerkung: Bei der Konfiguration der Register sind vor allem die Startadressen wichtig, weil im Reference Manual der Address Offset des jeweiligen Registers angegeben ist.
+	\section{Boot-Konfiguration}
+		siehe RM S. 43\\
+		\\Der STM32F030F4 kann entweder vom Flash Memory, System Memory oder Embedded RAM gebootet werden. Die Auswahl erfolgt durch das Setzen des nBOOT1 Bit im User Option Byte und durch den logischen Wert am Pin BOOT0. Sofern Letzterer auf Masse gezogen wird, wird unabhängig vom Ersteren immer vom Main Flash gestartet; da entschieden wurde, dass der Bootvorgang vom Flash-Speicher ausgehen soll, ist keine weitere Konfiguration durch Software notwendig.
+	\section{Pin-Konfiguration}
+		siehe Datenblatt STM32F030F4 S. 25ff und RM S. 127ff
+		\subsection{Allgemeines}
+			Die Konfiguration der GPIO-Pins erfolgt über 32bit große GPIO-Register. Laut RM verfügt jeder Pin über vier Konfigurationsregister, zwei Datenregister und ein Set/Reset-Register, Pins der Ports A und B verfügen außerdem noch über ein Locking-Register als auch über zwei Alternate-function-Register.\\
+			Über die Konfigurationsregister gpiox\_otyper, gpiox\_pupdr und gpiox\_ospeeder werden der Typ, Pull-up/down und die Geschwindigkeit des entsprechenden Pins ausgewählt. Mithilfe von gpiox\_moder wird der Pin entweder als Eingang, Ausgang, alternative Funktion (z. B. USART) oder analog (z. B. für ADC) konfiguriert. Die Datenregister gpio\_idr und gpio\_odr enthalten die Ein- und Ausgangswerte des jeweiligen Pins. Das set/reset-Register wird zum bitweisen Setzen, bzw. Rücksetzen der aussgangsseitigen Bits des Bits, was für diese Aufgabe nicht benötigt wird. Gleiches trifft auch auf das Locking-Register, welches den Schreibzugriff auf einen Pin verhindern kann, zu. Die gpio\_afrl- und gpio\_afrh-Register dienen der Auswahl einer alternativen Funktion am entsprechenden Port.
+		\subsection{Konfiguration der Register}
+			Anmerkung: Fehlende Register wurden in ihrer Default-Einstellung belassen.
+			\subsubsection{GPIO port mode register}
+				Auszug aus RM S. 136:\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig1"}\\
+				\\Auszug aus STM-Datenblatt S. 29 und 31:\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig2"}\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig3"}\\
+				\\Zur Erfüllung der Aufgabenstellung müssen die Ports PA9, PA10 und PA12 auf alternate function sowie der Port PA0 auf analog eingestellt werden. PA9 wird zum Senden (TX) und PA10 zum Empfangen (RX) von Daten über USART verwendet, PA12 dient als Driver-Enable (DE) des angeschlossenen MAX485. PA0 wird als Eingang des ADC verwendet und wird daher als analog konfiguriert.
+			\subsubsection{GPIO port output type register}
+				Auszug aus RM S. 136:\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig4"}\\
+			\subsubsection{GPIO port output speed register}
+				Auszug aus RM S. 137:\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig5"}\\
+			\subsubsection{GPIO port pull-up/pull-down register}
+				Auszug aus RM S. 137:\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig6"}\\
+			\subsubsection{GPIO alternate function high register}
+				Auszug aus RM S. 141:\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig7"}\\
+				Auszug aus STM-Datenblatt S. 34:\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig8"}\\
+				...\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig9"}\\
+				...\\
+				\\\includegraphics[width=1.0\textwidth]{"gpioconfig10"}\\
+				\\Wie aus dem Datenblatt-Auszug zu erkennen, muss die AF1 auf den Ports 9, 10 und 12 ausgewählt werden, um USART1 auf diesen zu aktivieren (Die ADC-Funktion auf PA0 wird als "additional function" bezeichnet, diese muss nicht durch das AFLR-Register aktiviert werden).
+		\subsection{Implementierung in C}
+				uint32\_t *gpioA\_afrh; // GPIO alternate function high register\\
+	gpioA\_afrh = 0x48000000 + 0x24; // Startadresse Port A + Adress Offset\\
+	*gpioA\_afrh $|$= 0x00010110; // Auswahl der AF1 (USART1) auf\\ 
+	// * PA9 (TX),\\
+	// * PA10 (RX) und\\
+	// * PA12 (DE)\\
+	\\uint32\_t *gpioA\_moder; // GPIO port mode register\\
+	gpioA\_moder = 0x48000000 + 0x00;\\
+	*gpioA\_moder $|$= 0x02000000; // Enable alternate function auf PA12(DE)\\
+	*gpioA\_moder $|$= 0x00200000; // Enable alternate function auf PA10(RX)\\
+	*gpioA\_moder $|$= 0x00080000; // Enable alternate function auf PA9(TX)\\
+	*gpioA\_moder $|$= 0x00000003; // Enable analog function auf PA0(ADC)
+	\section{Takt-Konfiguration}
+		\label{sec:clkconfig}
+		siehe RM S. 89ff.\\
+		\subsection{Allgemeines}
+			 Der Systemtakt kann entweder durch eine interne 8MHz-Taktquelle (HSI-Clock), einer externen Taktquelle (HSE-Clock), oder einer PLL-Clock gespeist werden. Weiters verfügt der ADC über eine eigene 14MHz-Taktquelle. Die Takte der Busse AHB und APB können durch Prescaler angepasst werden. Normalerweise wird Peripherie mit der gleichen Frequenz des entsprechenden Busses getaktet, dies gilt aber nicht für USART1 und den ADC, welche durch verschiedene Taktquellen gespeist werden können.\\
+			\\Auszug aus RM S. 90:\\
+			\\\includegraphics[width=1.0\textwidth]{"clkconfig1"}\\
+			\\Der Clock Tree stellt die Konfigurationsmöglichkeiten der Clocks graphisch dar, die gelben Markierungen dienen zur Kennzeichnung der für dieses Projekt vorgenommenen Einstellungen. Wie am Clock Tree zu erkennen, kann die PLL entweder von der HSE-Clock oder von der HSI-Clock gespeist werden. Die System Clock wird entweder von der HSE-Clock, der HSI-Clock oder der PLL gespeist und bestimmt in weiterer Folge die Maximalfrequenz der Busse AHB und APB. Der Takt für diese kann durch Prescaler weiter herunter geteilt werden, wobei die Frequenz des APB-Busses maximal jener des AHB-Busses entsprechen kann. Der Takt des ADC wird entweder vom APB-Bus gespeist oder von seiner eigenen 14MHz-Taktquelle. Die USART1 kann wahlweise entweder vom APB-Bus, von der System Clock, von der HSI-Clock oder von der HSE-Clock gespeist werden.\\
+			Für dieses Projekt wurde entschieden, die interne HSI-Clock anstatt einer externen zu verwenden, um externe Beschaltung einzusparen. Als System Clock wird die PLL verwendet, welche den durch die HSI-Clock gespeiste Taktfrequenz auf 48MHz erhöht. Diese wird dann anschließend als Takt für die USART1 verwendet. Der ADC wird durch seine 14MHz-Taktquelle gespeist.
+		\subsection{Konfiguration der Register}
+			Anmerkung: fehlende Register wurden in ihrer Default-Einstellung belassen
+			\subsubsection{Clock Control Register}
+				Auszug aus RM S. 99/100:\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig2"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig3"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig4"}\\
+				\\Mittels PLLRDY wird der Status der PLL überprüft, PLLON wird verwendet, um die PLL zu enabeln. Gleiches gilt für HSIRDY und HSION im Bezug auf die HSI-Clock. Die anderen Bits haben in diesem Projekt keine Bedeutung.
+			\subsubsection{Clock Configuration Register}
+				Auszug aus RM S. 101-103:\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig5"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig6"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig7"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig8"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig9"}\\
+				\\Um einen System-Takt von 48MHz zu erhalten, wird bei der PLL ein Multiplikationsfaktor von 12 benötigt, weil diese mit der Hälfte des Taktes der 8MHz-HSI-Clocks gespeist wird. Weiters werden die Takte der AHB- und APB-Busse nicht geteilt und entsprechen damit ebenfalls 48MHz.
+			\subsubsection{APB Peripheral Clock Enable Register 2}
+				Auszug aus RM S. 112-114\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig10"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig11"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig12"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig13"}\\
+			\subsubsection{Clock Configuration Register 3}
+				Auszug aus RM S. 123\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig14"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig15"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig16"}\\
+			\subsubsection{Clock Control Register 2}
+				Auszug aus RM S. 123/124\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig17"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig18"}\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig19"}\\
+			\subsubsection{ADC Configuration Register 2}
+				Auszug aus RM S. 216\\
+				\\\includegraphics[width=1.0\textwidth]{"clkconfig20"}\\
+		\subsection{Implementierung in C}
+			Auszug aus RM S. 94:\\
+			\\\includegraphics[width=1.0\textwidth]{"clkconfig21"}\\
+			\\// $--$ clock configuration $--$
+	uint32\_t *rcc\_cfgr; // Clock configuration register\\
+	rcc\_cfgr = 0x4002100 + 0x04;\\
+	*rcc\_cfgr $|$= 0x00280000; // Festlegung des Multiplikationsfaktors der PLL (12 => f=12* 8MHz/2)\\
+
+	uint32\_t *rcc\_cr; // Clock control register (STMR S. 99)\\
+	rcc\_cr = 0x4002100 + 0x00;\\
+	*rcc\_cr $|$= 0x01000083; // Enable PLL\\
+	while((*rcc\_cr) \&\& 0x02000000) != 0x02000000){ // Warten auf PLLRDY = 1\\
+	}\\
+
+	*rcc\_cfgr $|$= 0x00000002; // Festlegung der PLL als SYSCLK\\
+
+	uint32\_t *rcc\_cfgr3; // Clock configuration register 3 (S. 123)\\
+	rcc\_cfgr3 = 0x40021000 + 0x30;\\
+	*rcc\_cfgr3 $|$= 0x00000001; // SYSCLK (PLL) als USART1-CLK ausgewaehlt\\
+
+	uint32\_t *rcc\_cr2; // Clock control register 2 (STMR S. 123)\\
+	rcc\_cr2 = 0x40021000 + 0x34;\\
+	*rcc\_cr2 $|$= 0x00000001; // Enable HSI14\\
+	
+	uint32 *adc\_cfgr2; // ADC configuration register 2 (STMR S. 216)\\
+	adc\_cfgr2 = 0x40012400 + 0x10;\\
+	*adc\_cfgr2 $|$= 0x00000000; // Default; HSI14-CLK als ADC-CLK festgelegt\\
+	
+	uint32\_t *rcc\_apb2enr; // APB peripheral clock enable register 2 (STMR S. 112)\\
+	rcc\_apb2enr = 0x40021000 + 0x18;\\
+	*rcc\_apb2enr $|$= 0x00004200 // Enable CLK der\\
+	// * USART1 und des\\
+	// * ADC
+	\section{Konfiguration des ADC}
+		siehe RM S. 181ff
+		\subsection{Allgemeines}
+			Der ADC des STM32F030F4 verfügt über eine einstellbare Auflösung und kann über multiplexed Channels mehrere Signale messen. Die Umwandlung kann sowohl fortlaufend als auch einzeln erfolgen und das Wandelergebnis kann sowohl left- als auch right-aligned gespeichert werden.\\
+			Da ein 10-Byte großer Buffer übertragen werden soll, wird eine Auflösung von 8 Bit verwendet. Weiters wird nur ein Channel - Channel 0 - verwendet, die Umwandlung geschieht fortlaufend. Die Daten werden right-aligned gespeichert.
+			\subsubsection{Kalibration}
+				Auszug aus RM S. 185\\
+				\\\includegraphics[width=1.0\textwidth]{"adc14"}\\
+			\subsubsection{ADC-Enable}
+				Auszug aus RM S. 185\\
+				\\\includegraphics[width=1.0\textwidth]{"adc15"}\\
+			\subsubsection{ADC-Disable}
+				Auszug aus RM S. 186\\
+				\\\includegraphics[width=1.0\textwidth]{"adc16"}\\
+			\subsubsection{ADC-Kofigurationsregeln}
+				Auszug aus RM S. 188\\
+				\\\includegraphics[width=1.0\textwidth]{"adc17"}\\
+				\\Anmerkung: Bei Verletzung dieser Regeln kann es geschehen, dass der ADC in einen undefinierten Zustand eintritt. Sollte dies geschehen, muss der ADC disabelt werden und alle Bits im ADC\_CR-Register zurückgesetzt werden.
+			\subsubsection{Kanalauswahl}
+				siehe RM S. 189\\
+				\\Diese wird mit dem CHSEL-Register durchgeführt. Sollten mehrere die Signale mehrere Kanäle umgewandelt werden, kann die Reihenfolge mit dem SCANDIR-Register eingestellt werden; weil in diesem Projekt nur Daten aus einem Kanal ausgwertet werden, ist dies bedeutungslos.
+			\subsubsection{Programmierbare Sampling-Time}
+				siehe RM S. 189\\
+				\\Diese wurde in diesem Projekt auf ihren Default-Wert belassen (1,5 ADC-Zyklen).
+			\subsubsection{Single/Continuous Conversion Mode}
+				siehe RM S. 190\\
+				\\Abhängig vom CONT-Bit im ADC\_CFGR1-Register kann der Conversion Mode ausgewählt werden, in diesem Projekt wird der Continuous Mode verwendet. In diesem Fall startet der ADC nach Vorliegen des Wandelergebnisses den Wandelvorgang automatisch neu, das EOC-Flag wird gesetzt und es wird, sofern enabelt (dies ist in diesem Projekt der Fall), ein Interrupt ausgelöst.
+			\subsubsection{Starten des Wandelvorgangs}
+				siehe RM S. 190/191\\
+				\\Der Wandelvorgang wird durch das Setzen des ADSTART-Bits gestartet. Solange dieses gesetzt ist, ist der ADC aktiv.
+			\subsubsection{Stoppen des Wandelvorgangs}
+				siehe RM S. 192\\
+				\\Der Wandelvorgang wird durch das Setzen des ADSTP-Bits gestoppt, der aktuelle Wandelvorgang wird dadurch abgebrochen.
+			\subsubsection{Programmieren der Auflösung}
+				siehe RM S. 194\\
+				\\Diese kann durch das Setzen der RES-Bits konfiguriert werden, in diesem Projekt wird mit einer Auflösung von 8 Bits gearbeitet.
+			\subsubsection{Ende des Wandelvorgangs}
+				siehe RM S. 195\\
+				\\Nach Vorliegen des Wandelergebnisses wird das EOC(End of Conversion)-Flag gesetzt und, sofern enabelt, ein Interrupt ausgelöst. Das Flag wird durch das Auslesen des Inhalts des Datenregisters zurückgesetzt, dies kann aber auch manuell durch das Schreiben von '1' an das dieses erfolgen.\\
+				In diesem Projekt wird beim Ende des Wandelvorgangs ein Interrupt ausgelöst, das EOC-Flag wird manuell am Beginn der Interrupt-Service-Routine zurückgesetzt.
+			\subsubsection{Data Alignment}
+				siehe RM S . 198\\
+				\\Das Wandelergebnis wird im ADC\_DR-Register entweder left- oder right-aligned gespeichert; in diesem Projekt wurde entschieden, die Daten right-aligned zu speichern.
+			\subsubsection{Overrun}
+				siehe RM S. 198-199\\
+				Sollte ein neues Wandelergebnis vorliegen, aber das vorherige noch nicht ausgelesen worden sein (EOC-Flag nicht zurückgesetzt), wird das weitere Verhalten des ADC  - alte Daten überschreiben oder neue Daten verwerfen - durch den Overrun-Mode festgelegt.\\
+				In diesem Projekt wurde der Overrun-Mode so konfiguriert, dass neue Daten alte übeschreiben.
+			\subsubsection{ADC Interrupts}
+				siehe RM S. 206\\
+				\\Ein Interrupt kann bei mehreren Ereignissen erfolgen, es sollte aber beachtet werden, dass alle Ereignisse dieselbe Interrupt-Service-Routine auslösen. Weiters sind defaultmäßig alle Interrupts disabelt, dies müssen also vor ihrer Verwendung aktiviert werden.\\
+				In diesem Projekt werden Interrupts beim Vorliegen des Wandelergebnisses ausgelöst.
+		\subsection{Konfiguration der Register}
+			Anmerkung: Fehlende Register wurden in ihrer Default-Einstellung belassen.
+			\subsubsection{ADC Interrupt And Status Register}
+				Auszug aus RM S. 207\\
+				\\\includegraphics[width=1.0\textwidth]{"adc01"}\\
+				\\\includegraphics[width=1.0\textwidth]{"adc02"}\\
+				\\\includegraphics[width=1.0\textwidth]{"adc05"}\\
+			\subsubsection{ADC Interrupt Enable Register}
+				Auszug aus RM S. 208\\
+				\\\includegraphics[width=1.0\textwidth]{"adc03"}\\
+				\\\includegraphics[width=1.0\textwidth]{"adc04"}\\
+				\\Anmerkung: In diesem Projekt wird EOCIE enabelt.
+			\subsubsection{ADC Control Register}
+				Auszug aus RM S. 210\\
+				\\\includegraphics[width=1.0\textwidth]{"adc06"}\\
+				\\\includegraphics[width=1.0\textwidth]{"adc07"}\\
+			\subsubsection{ADC Configuration Register 1}
+				Auszug aus RM S. 212-215\\
+				\\\includegraphics[width=1.0\textwidth]{"adc08"}\\
+				\\\includegraphics[width=1.0\textwidth]{"adc09"}\\
+				\\\includegraphics[width=1.0\textwidth]{"adc10"}\\
+				\\Anmerkung: In diesem Projekt werden CONT=1 (continuous mode), OVERMOD=1 (overwrite old data), ALIGN=0 (right-aligned) und RES=10 (8 Bit) gesetzt.
+			\subsubsection{ADC Configuration Register 2}
+				Auszug aus RM S. 216\\
+				\\\includegraphics[width=1.0\textwidth]{"adc11"}\\
+				\\Anmerkung: Die Takt-Konfiguration des ADC wurde bereits im Kapitel \ref{sec:clkconfig} erläutert.
+			\subsubsection{ADC Channel Selection Register}
+				Auszug aus RM S. 218\\
+				\\\includegraphics[width=1.0\textwidth]{"adc12"}\\
+				\\Anmerkung: In diesem Projekt wird nur Channel 0 verwendet.
+			\subsubsection{ADC Data Register}
+				Auszug aus RM S. 218\\
+				\\\includegraphics[width=1.0\textwidth]{"adc13"}\\
+				\\Anmerkung: Daten werden right-aligned gespeichert.
+		\subsection{Implementierung in C}
+			\begin{lstlisting}
+// -- ADC configuration --
+// ADC boundary start adress: 0x40012400
+
+// Calibration software procedure
+// Ensure that ADEN=0 and DMAEN=0 -> automatisch nach Reset der Fall
+uint32_t *adc_cr; // ADC control register
+adc_cr = 0x40012400 + 0x08;
+*adc_cr |= 0x80000000; // Set ADCAL=1
+while((*adc_cr) && 0x80000000 == 0x80000000){ // Wait until ADCAL=0
+}
+
+// Enable the ADC
+uint32_t *adc_isr; // ADC interrupt and status register
+adc_isr = 0x040012400 + 0x00;
+*adc_isr |= 0x00000001; // Clear ADRDY bit
+*adc_cr |= 0x00000001; // Set ADEN=1
+while(*adc_isr == 0x00000001){// Wait until ADRDY=1
+}
+
+// miscellaneous
+uint32_t *adc_cfgr1; // ADC configuration register 1
+adc_cfgr1 = 0x40012400 + 0x0C;
+*adc_cfgr1 |= 0x00003010; // continuous mode, overrun mode (overwrite), data alignment (right), resolution (8 bits)
+
+// Sampling time selection
+Defaulteinstellungen: sampling time = 1,5 clock cycles
+
+// Channel Selection
+uint32_t *adc_chselr; // ADC channel selection register
+adc_chselr = 0x40012400 + 0x28;
+*adc_chselr |= 0x00000001; // Channel 0 ausgewaehlt
+
+// Enable Interrupts
+uint32_t *adc_ier; // ADC interrupt enable register
+adc_ier = 0x40012400 + 0x04;
+*adc_ier |= 0x00000004; // Interrupt bei Vorliegen des Wandelergebnisses
+
+	// Set ADSTART
+	*adc_cr |= 0x00000004;
+			\end{lstlisting}
+	\section{Konfiguration der USART}
+		\subsection{Allgemeines}
+		\subsection{Konfiguration der Register}
+			Anmerkung: Fehlende Register wurden in ihrer Default-Einstellung belassen.
+			\subsubsection{Control Register 1}
+				Auszug aus RM S. 625-627\\
+				\\\includegraphics[width=1.0\textwidth]{"usart1"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart2"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart3"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart4"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart5"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart6"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart7"}\\
+			\subsubsection{Control Register 2}
+				Auszug aus RM S. 628-630\\
+				\\\includegraphics[width=1.0\textwidth]{"usart8"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart9"}\\
+			\subsubsection{Control Register 3}
+				Auszug aus RM S. 630-632\\
+				\\\includegraphics[width=1.0\textwidth]{"usart10"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart11"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart12"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart13"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart14"}\\
+			\subsubsection{Baud Rate Register}
+				Auszug aus RM S. 633\\
+				\\\includegraphics[width=1.0\textwidth]{"usart15"}\\
+			\subsubsection{Request Register}
+				Auszug aus RM S. 634\\
+				\\\includegraphics[width=1.0\textwidth]{"usart16"}\\
+			\subsubsection{Interrupt And Status Register}
+				Auszug aus RM S. 635-638\\
+				\\\includegraphics[width=1.0\textwidth]{"usart17"}\\
+				\\\includegraphics[width=1.0\textwidth]{"usart18"}\\
+			\subsubsection{Receive Data Register}
+				Auszug aus RM S. 639\\
+				\\\includegraphics[width=1.0\textwidth]{"usart19"}\\
+			\subsubsection{Transmit Data Register}
+				Auszug aus RM S. 640\\
+				\\\includegraphics[width=1.0\textwidth]{"usart20"}\\
+	\section{Konfiguration des NVIC und Implementierung der Interrupt-Service-Routinen}
+	\section{Implementierung in C}
+		\begin{lstlisting}
+/*
+Titel: main
+Beschreibung:
+Autor: Patrick Wintner
+GitHub: https://github.com/EternalNothingness/https://github.com/EternalNothingness/DIC-5BHEL-Projekt_1-Serielle-Kommunikation-mit-uC.git.git
+Datum der letzten Bearbeitung: 17.01.2021
+*/
+
+#include <stdlib.h>
+
+// -- verwendete Abkuerzungen --
+// STMR ... STM32F030F4 Reference Manual
+
+volatile int adc_interrupt_flag = 0;
+volatile int usart_interrupt_flag = 0;
+
+void ADC1_IRQHandler(void) __attribute__((interrupt));
+void ADC1_IRQHandler(void){
+	uint32_t *adc_isr;
+	adc_isr = 0x040012400 + 0x00;
+	*adc_isr |= 0x00000004; // Clear isr-flag
+	adc_interupt_flag = 1;
+}
+
+void USART1_IRQHandler(void __attribute__((interrupt));
+void USART1_IRQHandler(void){
+	uint32_t *usart_rqr;
+	usart_rqr = 0x40013800 + 0x00;
+	*usart_rqr |= 0x00000008; // Clear isr-flag
+	usart_interrupt_flag = 1;
+}
+
+int main(){
+	// -- boot configuration --
+	// Default; Boot von Main Flash Memory (Boot0 = 0)
+	// ----------------------------------------
+
+	// -- alternate function configuration --
+	uint32_t *gpioA_afrh; // GPIO alternate function high register (STMR S. 141)
+	gpioA_afrh = 0x48000000 + 0x24;
+	*gpioA_afrh |= 0x00010110; // Auswahl der AF1 (USART1) auf 
+	// * PA9 (TX),
+	// * PA10 (RX) und
+	// * PA12 (DE)
+
+	uint32_t *gpioA_moder; // GPIO port mode register (STMR S. 136)
+	gpioA_moder = 0x48000000 + 0x00;
+	*gpioA_moder |= 0x2A280003; // Enable der alternate functions...
+	// * USART1 auf PA9(TX),
+	// * PA10(RX) und 
+	// * PA12(DE) sowie
+	// * Aktivierung analog function auf PA0 fuer den ADC
+	// ----------------------------------------
+
+	// -- clock configuration --
+	uint32_t *rcc_cfgr; // Clock configuration register (STMR S. 101)
+	rcc_cfgr = 0x4002100 + 0x04;
+	*rcc_cfgr |= 0x00280000; // Festlegung des Multiplikationsfaktors der PLL (12 => f=12* 8MHz/2)
+
+	uint32_t *rcc_cr; // Clock control register (STMR S. 99)
+	rcc_cr = 0x4002100 + 0x00;
+	*rcc_cr |= 0x01000083; // Enable PLL
+	while((*rcc_cr) && 0x02000000) != 0x02000000){ // Warten auf PLLRDY = 1
+	}
+
+	*rcc_cfgr |= 0x00000002; // Festlegung der PLL als SYSCLK
+
+	uint32_t *rcc_cfgr3; // Clock configuration register 3 (S. 123)
+	rcc_cfgr3 = 0x40021000 + 0x30;
+	*rcc_cfgr3 |= 0x00000001; // SYSCLK (PLL) als USART1-CLK ausgewaehlt
+
+	uint32_t *rcc_cr2; // Clock control register 2 (STMR S. 123)
+	rcc_cr2 = 0x40021000 + 0x34;
+	*rcc_cr2 |= 0x00000001; // Enable HSI14
+	
+	uint32 *adc_cfgr2; // ADC configuration register 2 (STMR S. 216)
+	adc_cfgr2 = 0x40012400 + 0x10;
+	*adc_cfgr2 |= 0x00000000; // Default; HSI14-CLK als ADC-CLK festgelegt
+	
+	uint32_t *rcc_apb2enr; // APB peripheral clock enable register 2 (STMR S. 112)
+	rcc_apb2enr = 0x40021000 + 0x18;
+	*rcc_apb2enr |= 0x00004200 // Enable CLK der 
+	// * USART1 und des
+	// * ADC
+	// ----------------------------------------
+
+	// -- ADC configuration --
+	// Calibration software procedure (STMR S. 185)
+	// Ensure that ADEN=0 and DMAEN=0 -> automatisch nach Reset der Fall
+	uint32_t *adc_cr; // ADC control register STMR S.210
+	adc_cr = 0x40012400 + 0x08;
+	*adc_cr |= 0x80000000; // Set ADCAL=1
+	while((*adc_cr) && 0x80000000 == 0x80000000){ // Wait until ADCAL=0
+	}
+
+	// Enable the ADC (STMR S. 185)
+	uint32_t *adc_isr; // STMR S. 207
+	adc_isr = 0x040012400 + 0x00;
+	*adc_isr |= 0x00000001; // Clear ADRDY bit
+	*adc_cr |= 0x00000001; // Set ADEN=1
+	while(*adc_isr == 0x00000001){// Wait until ADRDY=1
+	}
+
+	// miscellaneous
+	uint32_t *adc_cfgr1; // ADC configuration register 1 (STMR S.212)
+	adc_cfgr1 = 0x40012400 + 0x0C;
+	//*adc_cfgr1 |= 0x00003010;
+	*adc_cfgr1 |= 0x00002000; // continuous mode
+	*adc_cfgr1 |= 0x00001000; // overrun mode (overwrite)
+	*adc_cfgr1 |= 0x00000000; // data alignment (right)
+	*adc_cfgr1 |= 0x00000010; // resolution (8 bits)
+
+	// Sampling time selection
+	uint32_t *adc_smpr; // ADC sampling time register (STMR S. 216)
+	adc_smpr = 0x0x40012400 + 0x14;
+	*adc_smpr |= 0x00000000; // Default; sampling time = 1,5 clock cycles
+
+	// Channel Selection
+	uint32_t *adc_chselr; // ADC channel selection register (STMR S. 218)
+	adc_chselr = 0x40012400 + 0x28;
+	*adc_chselr |= 0x00000001; // Channel 0 ausgewaehlt
+
+	// Enable Interrupts
+	uint32_t *adc_ier; // ADC interrupt enable register (STMR S. 208)
+	adc_ier = 0x40012400 + 0x04;
+	*adc_ier |= 0x00000004; // Interrupt bei Vorliegen des Wandelergebnisses
+
+	// Setting ADSTART
+	*adc_cr |= 0x00000004;
+	// ----------------------------------------
+
+	// -- NVIC/Interrupt configuration --
+	NVIC_EnableIRQ(27); // Enable USART1-Interrupt
+	NVIC_SetPriority(27, 2); // Setzen der Prioritaet
+
+	NVIC_EnableIRQ(12); // Enable USART1-Interrupt
+	NVIC_SetPriority(12, 3); // Setzen der Prioritaet
+	// ----------------------------------------
+
+	// -- USART1 configuration --
+	// reception procedure (STMR S. 605)
+	uint32_t *usart_cr1; // USART control register 1 (STMR S. 625)
+	usart_cr1 = 0x40013800 + 0x00;
+	*usart_cr1 |= 0x00000000; // Word length = 8 Bits (Default)
+	*usart_cr1 |= 0x00??0000; // Drive Enable assertion time = ???
+	*usart_cr1 |= 0x00??0000; // Drive Enable de-assertion time = ???
+	*usart_cr1 |= 0x00000000; // oversampling rate 16
+	*usart_cr1 |= 0x00000400; // enable parity
+	*usart_cr1 |= 0x00000200; // ODD parity gewaehlt
+	*usart_cr1 |= 0x00000020; // Interrupt bei Empfang von Daten
+
+	uint32_t *usart_cr3; // USART control register 3 (STMR S. 630)
+	usart_cr3 = 0x40013800 + 0x08;
+	*usart_cr3 |= 0x00005800 // Disable Overrun-Error, Enable DE-function, one sample bit method
+
+	uint32_t *usart_brr; // Baud rate register (STMR S. 633)
+	usart_brr = 0x40013800 + 0x0C;
+	*usart_brr |= 0x000004E2; // Baud rate = 38400 fuer f=48MHz
+
+	uint32_t *usart_cr2; // USART control register 2 (STMR S. 628)
+	usart_cr2 = 0x40013800 + 0x04;
+	*usart_cr2 |= 0x00000000; // Default; 1 STOP bit
+
+	usart_cr1 |= 0x00000001; // Enable USART1
+
+	usart_cr1 |= 0x00000004; // Set the RE bit for enabling reception
+	// ----------------------------------------
+
+	uint32_t *adc_isr; // ADC interrupt and status register (STMR S. 207)
+	adc_isr = 0x40012400 + 0x00;
+	uint32_t *adc_dr; // ADC data register (STMR S. 218)
+	adc_dr = 0x40012400 + 0x40;
+	
+	uint32 *usart_isr; // USART interrupt and status register (STM S.635)
+	usart_isr = 0x40013800 + 0x1C;
+	uint32 *usart_tdr; // USART transmit data register (STMR S. 640)
+	usart_tdr = 0x40013800 + 0x28;
+
+	uint32_t *buf=malloc(10*sizeof(uint32_t)); // 10 Byte (nur die jeweils letzten 8 Bit werden verwendet) Buffer fuer ADC
+
+	for(int i=0; i<=9; i++){
+		*(buf+i) = 0x00; // Reset Buffer
+	}
+	
+	// main loop
+	for(;;){
+		if(adc_interrupt_flag == 1){
+			for(int i=9; i>0; i--){
+				*(buf+i) = *(buf+i-1); // shift right
+			}
+			*buf = *adc_dr;
+			*adc_interrupt_flag = 0x00; // Reset Interrupt-Flag
+		}
+		if(usart_interrupt_flag == 1){
+			*adc_crr |= 0x00000010// Stop ADC to avoid interruptions during transmission
+			*usart_cr1 &= 0xFFFFFFFB // Disable Reception
+			*usart_cr1 |= 0x00000008 // Enable Transmission
+			for(int i=9; i>=0; i--){
+				*usart_tdr = *(buf+i); // Aeltere Daten werden zuerst gesendet
+				while((usart_isr && 0x00000040) != 0x00000040){ // Wait until transmission complete
+				}
+			}
+			*usart_cr1 &= 0xFFFFFFF7 // Disable Transmission
+			*usart_cr1 |= 0x00000004; // Enable Reception
+			*adc_cr |= 0x00000004; // Start ADC
+			*usart_interrupt_flag = 0x00; // Reset Interrupt-Flag
+		}
+	}
+}
+	\end{lstlisting}
+\end{document}
