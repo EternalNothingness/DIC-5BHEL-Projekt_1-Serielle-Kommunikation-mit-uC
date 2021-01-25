@@ -44,8 +44,25 @@
 		RO ... receiver output\\
 		\\Kompatibilität zu RS-422: RS-485-Bauteile können bei RS-422-Nethwerken verwendet werden, umgekehrt nicht immer.
 	\section{MAX485}
-		Hierbei handelt es sich um einen Transceiver (= sowohl Sender als auch Empfänger) für den RS-485-Standard mit folgenden Eigenschaften:\\
-		half-duplex, Datenrate = 2,5Mb/s, kein Limit bei Slew Rate, Driver/Receiver Enable, quiescent current = 300uA, Anzahl an möglichen Empfängern = 32 und einer Pin-Anzahl von Acht. Logik-Pegel befinden sich auf Seite 2 des Datenblattes, Beschreibungen der Pins auf Seite 7.
+		\subsection{Allgemeines}
+		Der MAX485 ist ein Transceiver (kann sowohl Daten senden als auch empfangen), welcher für den RS485-Standard entwickelt wurde. Er verfügt über folgende Eigenschaften:\\
+		\\Auszüge aus dem Datenblatt des MAX485 S. 1-3\\
+		\\\includegraphics[width=1\textwidth]{"mx1"}\\
+		\includegraphics[width=1\textwidth]{"mx2"}\\ 
+		\\\includegraphics[width=1\textwidth]{"mx3"}\\
+		\includegraphics[width=1\textwidth]{"mx4"}\\
+		\includegraphics[width=1\textwidth]{"mx5"}\\
+		\\\includegraphics[width=1\textwidth]{"mx6"}\\
+		\includegraphics[width=1\textwidth]{"mx7"}\\
+		\\Die Umschaltzeiten spielen bei der Konfiguration der USART später eine Rolle.
+		\subsection{Pin-Beschreibung}
+			Auszug aus Datenblatt des MAX48S. 7\\
+			\\\includegraphics[width=1\textwidth]{"mx8"}\\
+			\\Die Bezeichnungen der Ein- und Ausgänge stimmen weitgehend mit denen des weiter oben erläuterten Standardbezeichnungen für den RS485-Standard. Der einzige Unterschied besteht in der Doppelfunktion der Sendeaus- und Empfangseingänge A und B - diese übernehmen nicht durch den Empfang von Daten (wie weiter oben), sondern dienen auch als Sendeausgänge, wobei A die Funktion von Y und B die Funktion von Z übernimmt. Es erscheint sinnvoll, die Pins DE und /RE mit der gleichen Leitung anzusteuern, weil damit entweder der Baustein als Empfänger (DE=RE=0) oder als Sender fungiert (DE=RE=1).
+		\subsection{Wahrheitstabellen}
+			Auszug aus Datenblatt des MAX48S. 10\\
+			\\\includegraphics[width=1\textwidth]{"mx9"}\\
+			Diese stimmen mit denen des RS485-Standards überein, mit Ausnahme der bereits erwähnten Doppelfunktion der Empfangsein- und Sendeausgänge A und B (A ersetzt Y, B ersetzt Z).
 	\section{Pegel}
 		Logikpegel dienen der Repräsentation von den logischen Werten 0 und 1 in der Digitaltechnik. Diese sind oft Spannungen. Es wird zwischen Low-Pegeln (L-Pegeln, Low, L) und High-Pegeln (H-Pegeln, High, H) unterschieden. Bei Spezifikationen werden für L Maximal- und für H Minimalpegel vorgegeben:\\
 		\\V{\tiny IL} ... maximale Eingangsspannung, bei welcher noch arantiert wird, dass diese als L interpretiert wird\\
@@ -54,8 +71,7 @@
 		V{\tiny OH} ... minimale Ausgangsspannung für H\\
 		\\Zusätzlich gilt, dass V{\tiny IL} $>$ V{\tiny OL} und dass V{\tiny IH} $<$ V{\tiny OH}. Dadurch soll sichergestellt werden, dass Eingänge die Werte der ihnen angeschlossenen Ausgänge richtig interpretieren können.
 	\section{Half-Duplex}
-		Duplex ... Richtungsunabhängigkeit eines Kommunikationskanals\\
-		half-duplex: Daten können abwechselnd, aber nicht gleichzeitig, übertragen und empfangen werden.
+		Wenn Kommunikation half-duplex erfolgt, so werden Daten abwechselnd, aber nicht gleichzeitig, in beide Richtungen gesandt werden. Daraus folgt, dass die kommunizierenden Geräte sich an ein Regelwerk halten müssen, um sich nicht gegenseitig zu behindern. Da der STM32 dieses Projektes laut Aufgabenstellung eine reaktionäre Rolle spielt (Er sendet Daten nur, nachdem er welche empfangen hat), wird davon ausgegangen, dass die Gegenseite nach dem Senden des den Sendeprozess auslösenden Zeichens solange mit weiteren Übertragungen wartet, bis die Übertragung des 10-Byte-Buffers abgeschlossen ist.
 	\chapter{Konfiguration des STM32F030F4}
 	\section{Einführung}
 		Beim STM32F030F4-Chip handelt es sich um einen auf ARMv6-M-basierten Microkontroller, welcher mit maximal 48MHz arbeitet, 16kB Flash-Speicher und 4kB SRAM aufweist und eine Reihe von Peripheriegeräten, darunter USART-Schnittstellen und einen ADC enthält. Aus der Tabelle 2 des Datenblattes auf Seite 10 geht hervor, dass Chips der STM32F030xF-Serie lediglich über die USART1-Schnittstelle verfügen, weshalb, entgegen der Aufgabenstellung, USART1 anstatt USART3 verwendet wird und deshalb auch nicht die Pins PC10 und PC11 zum Anschluss des MAX485 verwendet werden.\\
