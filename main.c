@@ -193,8 +193,10 @@ int main(){
 			*usart_cr1 |= 0x00000008 // Enable Transmission
 			for(int i=9; i>=0; i--){
 				*usart_tdr = *(buf+i); // Older data is sent first
-				while((usart_isr & 0x00000040) != 0x00000040){ // Wait until transmission complete
+				while((usart_isr & 0x00000080) != 0x00000080){ // Wait until data is transferred to the shift register
 				}
+			}
+			while((usart_isr & 0x00000040) != 0x00000040){ // Wait until transmission complete
 			}
 			*usart_cr1 &= 0xFFFFFFF7 // Disable Transmission
 			*usart_cr1 |= 0x00000004; // Enable Reception
